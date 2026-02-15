@@ -10,7 +10,7 @@
 
 **A machine learning web app that predicts Forest Fire Weather Index (FWI) in real-time using Ridge Regression — trained on the Algerian Forest Fire Dataset.**
 
-[🚀 Live Demo](https://pyrosense.onrender.com) · [📊 Dataset](https://archive.ics.uci.edu/dataset/547/algerian+forest+fires+dataset) · [🐛 Report Bug](https://github.com/nilesh5566/pyrosense/issues)
+[🚀 Live Demo](https://pyrosense.onrender.com) · [📊 Dataset](https://archive.ics.uci.edu/dataset/547/algerian+forest+fires+dataset) · [🐛 Report Bug](https://github.com/nilesh5566)
 
 </div>
 
