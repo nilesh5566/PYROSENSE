@@ -1,0 +1,848 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PyroSense — Forest Fire Intelligence</title>
+    <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Instrument+Sans:ital,wght@0,400;0,600;1,400&family=DM+Mono:wght@300;400&display=swap" rel="stylesheet">
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        :root {
+            --f1: #FF2200;
+            --f2: #FF6B35;
+            --f3: #FF9A00;
+            --ember: #FFD166;
+            --deep: #070708;
+            --panel: #0e0e10;
+            --text: #F0EBE1;
+            --muted: #5a5560;
+            --dim: #2a2730;
+        }
+
+        html { scroll-behavior: smooth; }
+        body {
+            font-family: 'Instrument Sans', sans-serif;
+            background: var(--deep);
+            color: var(--text);
+            overflow-x: hidden;
+            cursor: none;
+        }
+
+        /* ══════════════════════════════════════
+           CUSTOM CURSOR
+        ══════════════════════════════════════ */
+        #cur {
+            position: fixed; width: 8px; height: 8px;
+            background: var(--f1); border-radius: 50%;
+            pointer-events: none; z-index: 9999;
+            transform: translate(-50%,-50%);
+            transition: transform 0.1s, width 0.3s, height 0.3s, background 0.3s;
+        }
+        #curT {
+            position: fixed; width: 40px; height: 40px;
+            border: 1px solid rgba(255,107,53,0.4);
+            border-radius: 50%; pointer-events: none; z-index: 9998;
+            transform: translate(-50%,-50%);
+            transition: all 0.15s ease-out;
+        }
+        body:has(a:hover) #cur  { width:16px; height:16px; background:var(--ember); }
+        body:has(a:hover) #curT { width:56px; height:56px; border-color:var(--ember); opacity:0.6; }
+
+        /* ══════════════════════════════════════
+           HEATMAP GRID BACKGROUND
+        ══════════════════════════════════════ */
+        #heatCanvas {
+            position: fixed; inset: 0;
+            width: 100%; height: 100%;
+            pointer-events: none; z-index: 0;
+            opacity: 0.6;
+        }
+
+        /* Vignette */
+        body::before {
+            content: '';
+            position: fixed; inset: 0; z-index: 1;
+            background:
+                radial-gradient(ellipse at 50% 50%, transparent 30%, rgba(7,7,8,0.85) 100%),
+                radial-gradient(ellipse at 50% 0%, rgba(7,7,8,0.6) 0%, transparent 60%);
+            pointer-events: none;
+        }
+
+        /* ══════════════════════════════════════
+           NAV
+        ══════════════════════════════════════ */
+        nav {
+            position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 1.6rem 3rem;
+        }
+        .logo {
+            font-family: 'Bebas Neue', sans-serif;
+            font-size: 1.4rem; letter-spacing: 0.12em;
+            color: var(--text); text-decoration: none;
+            display: flex; align-items: center; gap: 0.5rem;
+        }
+        .logo-dot {
+            width: 8px; height: 8px; border-radius: 50%;
+            background: var(--f1);
+            animation: livePulse 1.4s ease-in-out infinite;
+        }
+        @keyframes livePulse {
+            0%,100% { box-shadow: 0 0 0 0 rgba(255,34,0,0.6); }
+            50%     { box-shadow: 0 0 0 6px rgba(255,34,0,0); }
+        }
+        .nav-right {
+            display: flex; align-items: center; gap: 1.5rem;
+            font-size: 0.72rem; letter-spacing: 0.12em;
+            text-transform: uppercase; color: var(--muted);
+        }
+        .nav-status {
+            display: flex; align-items: center; gap: 0.5rem;
+            padding: 0.3rem 0.9rem;
+            border: 1px solid var(--dim); border-radius: 4px;
+            font-size: 0.65rem; color: var(--f3);
+        }
+        .status-dot {
+            width: 5px; height: 5px; border-radius: 50%;
+            background: #22c55e; animation: livePulse 1.8s ease-in-out infinite;
+        }
+
+        /* ══════════════════════════════════════
+           HERO — SPLIT LAYOUT
+        ══════════════════════════════════════ */
+        .hero {
+            position: relative; z-index: 2;
+            min-height: 100vh;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            align-items: center;
+            padding: 0 3rem;
+            gap: 2rem;
+        }
+
+        /* LEFT — Text */
+        .hero-left { padding-top: 5rem; }
+
+        .hero-tag {
+            display: inline-flex; align-items: center; gap: 0.6rem;
+            font-size: 0.65rem; letter-spacing: 0.3em; text-transform: uppercase;
+            color: var(--f2); margin-bottom: 1.8rem;
+            opacity: 0; animation: slideIn 0.7s 0.2s ease forwards;
+        }
+        .hero-tag::before {
+            content: ''; display: block;
+            width: 28px; height: 1px; background: var(--f2);
+        }
+
+        .hero-title {
+            font-family: 'Bebas Neue', sans-serif;
+            font-size: clamp(4.5rem, 8vw, 9rem);
+            line-height: 0.9;
+            letter-spacing: 0.02em;
+            margin-bottom: 1.5rem;
+            opacity: 0; animation: slideIn 0.8s 0.35s ease forwards;
+        }
+        .hero-title .t1 { display: block; color: var(--text); }
+        .hero-title .t2 {
+            display: block;
+            -webkit-text-stroke: 2px var(--f2);
+            color: transparent;
+            position: relative;
+        }
+        .hero-title .t2::after {
+            content: attr(data-text);
+            position: absolute; left: 0; top: 0;
+            background: linear-gradient(90deg, var(--f1), var(--ember));
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+            background-clip: text;
+            clip-path: inset(0 100% 0 0);
+            animation: textReveal 1.5s 1s ease forwards;
+        }
+        @keyframes textReveal { to { clip-path: inset(0 0% 0 0); } }
+
+        .hero-title .t3 { display: block; color: var(--muted); font-size: 0.45em; letter-spacing: 0.15em; margin-top: 0.3em; }
+
+        .hero-desc {
+            font-size: 0.95rem; color: var(--muted); line-height: 1.75;
+            max-width: 400px; margin-bottom: 2.5rem;
+            opacity: 0; animation: slideIn 0.8s 0.5s ease forwards;
+        }
+        .hero-desc strong { color: var(--text); font-weight: 600; }
+
+        .hero-actions {
+            display: flex; align-items: center; gap: 1.2rem; flex-wrap: wrap;
+            opacity: 0; animation: slideIn 0.8s 0.65s ease forwards;
+        }
+
+        .btn-launch {
+            display: inline-flex; align-items: center; gap: 0.8rem;
+            font-family: 'Instrument Sans', sans-serif;
+            font-size: 0.82rem; font-weight: 600;
+            letter-spacing: 0.1em; text-transform: uppercase;
+            color: #000; text-decoration: none;
+            background: linear-gradient(135deg, var(--f3), var(--ember));
+            padding: 0.9rem 2rem; border-radius: 6px;
+            position: relative; overflow: hidden;
+            transition: transform 0.25s, box-shadow 0.25s;
+            box-shadow: 0 0 40px rgba(255,154,0,0.25);
+        }
+        .btn-launch::before {
+            content: ''; position: absolute; inset: 0;
+            background: linear-gradient(135deg, var(--f1), var(--f2));
+            opacity: 0; transition: opacity 0.3s;
+        }
+        .btn-launch:hover { transform: translateY(-3px); box-shadow: 0 8px 50px rgba(255,100,0,0.45); }
+        .btn-launch:hover::before { opacity: 1; }
+        .btn-launch span, .btn-launch svg { position: relative; z-index: 1; }
+        .btn-launch:hover svg { transform: translateX(4px); }
+        .btn-launch svg { transition: transform 0.25s; }
+
+        .btn-ghost {
+            display: inline-flex; align-items: center; gap: 0.5rem;
+            font-size: 0.78rem; letter-spacing: 0.1em; text-transform: uppercase;
+            color: var(--muted); text-decoration: none;
+            border: 1px solid var(--dim); border-radius: 6px;
+            padding: 0.9rem 1.5rem;
+            transition: color 0.2s, border-color 0.2s;
+        }
+        .btn-ghost:hover { color: var(--text); border-color: var(--muted); }
+
+        /* ══════════════════════════════════════
+           RIGHT — Dashboard Panel
+        ══════════════════════════════════════ */
+        .hero-right {
+            padding-top: 5rem;
+            display: flex; flex-direction: column; gap: 1rem;
+            opacity: 0; animation: fadeUp 1s 0.7s ease forwards;
+        }
+
+        .dash-panel {
+            background: rgba(14,14,16,0.85);
+            border: 1px solid var(--dim);
+            border-radius: 12px;
+            backdrop-filter: blur(20px);
+            overflow: hidden;
+        }
+
+        /* FWI Gauge card */
+        .gauge-card {
+            padding: 1.5rem 1.8rem;
+        }
+        .card-label {
+            font-size: 0.6rem; letter-spacing: 0.2em; text-transform: uppercase;
+            color: var(--muted); margin-bottom: 1rem;
+            display: flex; align-items: center; justify-content: space-between;
+        }
+        .card-label span { color: var(--f3); }
+
+        .gauge-wrap {
+            position: relative; width: 100%; height: 8px;
+            background: var(--dim); border-radius: 4px; overflow: hidden;
+            margin-bottom: 0.6rem;
+        }
+        .gauge-track {
+            height: 100%;
+            background: linear-gradient(to right, #22c55e, #eab308, #f97316, var(--f1));
+            border-radius: 4px;
+            width: 0%;
+            animation: gaugeLoad 2s 1.2s cubic-bezier(0.22,1,0.36,1) forwards;
+        }
+        @keyframes gaugeLoad { to { width: 68%; } }
+        .gauge-needle {
+            position: absolute; top: -3px;
+            width: 2px; height: 14px;
+            background: #fff; border-radius: 1px;
+            left: 0%;
+            animation: needleMove 2s 1.2s cubic-bezier(0.22,1,0.36,1) forwards;
+        }
+        @keyframes needleMove { to { left: calc(68% - 1px); } }
+
+        .gauge-labels {
+            display: flex; justify-content: space-between;
+            font-size: 0.58rem; color: var(--muted); letter-spacing: 0.05em;
+        }
+
+        .fwi-reading {
+            display: flex; align-items: baseline; gap: 0.4rem; margin-top: 1rem;
+        }
+        .fwi-num {
+            font-family: 'Bebas Neue', sans-serif; font-size: 3.5rem;
+            line-height: 1; color: var(--f2);
+            counter-reset: num 0;
+            animation: countUp 2s 1.2s ease forwards;
+        }
+        @keyframes countUp {
+            0%   { color: #22c55e; }
+            40%  { color: #eab308; }
+            70%  { color: var(--f3); }
+            100% { color: var(--f2); }
+        }
+        .fwi-unit { font-size: 0.7rem; color: var(--muted); letter-spacing: 0.1em; }
+        .fwi-risk {
+            margin-left: auto;
+            font-size: 0.62rem; letter-spacing: 0.15em; text-transform: uppercase;
+            background: rgba(255,107,53,0.15);
+            border: 1px solid rgba(255,107,53,0.3);
+            color: var(--f2); padding: 0.25rem 0.7rem; border-radius: 4px;
+        }
+
+        /* Live metrics row */
+        .metrics-row {
+            display: grid; grid-template-columns: repeat(4, 1fr);
+            border-top: 1px solid var(--dim);
+        }
+        .metric {
+            padding: 1rem 1.2rem;
+            border-right: 1px solid var(--dim);
+            position: relative; overflow: hidden;
+        }
+        .metric:last-child { border-right: none; }
+        .metric::after {
+            content: '';
+            position: absolute; bottom: 0; left: 0; right: 0;
+            height: 2px;
+            background: linear-gradient(to right, transparent, var(--f2), transparent);
+            transform: scaleX(0);
+            transition: transform 0.4s;
+        }
+        .metric:hover::after { transform: scaleX(1); }
+        .metric-val {
+            font-family: 'Bebas Neue', sans-serif;
+            font-size: 1.6rem; color: var(--text); display: block;
+        }
+        .metric-lbl {
+            font-size: 0.55rem; letter-spacing: 0.15em;
+            text-transform: uppercase; color: var(--muted);
+        }
+        .metric-delta {
+            font-size: 0.6rem; color: var(--f3); margin-top: 0.1rem; display: block;
+        }
+
+        /* Sparkline card */
+        .sparkline-card { padding: 1.2rem 1.8rem; }
+        .spark-header {
+            display: flex; align-items: center; justify-content: space-between;
+            margin-bottom: 0.8rem;
+        }
+        .spark-title { font-size: 0.6rem; letter-spacing: 0.2em; text-transform: uppercase; color: var(--muted); }
+        .spark-live {
+            display: flex; align-items: center; gap: 0.3rem;
+            font-size: 0.58rem; color: #22c55e; letter-spacing: 0.1em;
+        }
+        .spark-dot { width:5px; height:5px; border-radius:50%; background:#22c55e; animation:livePulse 1.5s infinite; }
+        #sparkSvg { width: 100%; height: 48px; }
+
+        /* Region tags */
+        .region-card {
+            padding: 1rem 1.8rem;
+            display: flex; align-items: center; gap: 1rem;
+        }
+        .region-tag {
+            flex: 1; padding: 0.6rem 1rem;
+            border: 1px solid var(--dim); border-radius: 6px;
+            font-size: 0.7rem; letter-spacing: 0.08em;
+            display: flex; align-items: center; gap: 0.5rem;
+            transition: border-color 0.2s, background 0.2s;
+            cursor: default;
+        }
+        .region-tag:hover { border-color: var(--f2); background: rgba(255,107,53,0.05); }
+        .rtag-dot { width:6px; height:6px; border-radius:50%; }
+        .rtag-dot.bejaia { background: var(--f3); }
+        .rtag-dot.sidi   { background: var(--f2); }
+        .rtag-name { font-weight: 600; color: var(--text); }
+        .rtag-sub  { font-size: 0.58rem; color: var(--muted); margin-left: auto; }
+
+        /* ══════════════════════════════════════
+           TICKER
+        ══════════════════════════════════════ */
+        .ticker {
+            position: relative; z-index: 2;
+            border-top: 1px solid var(--dim);
+            border-bottom: 1px solid var(--dim);
+            padding: 0.7rem 0;
+            overflow: hidden;
+            background: rgba(14,14,16,0.6);
+        }
+        .ticker-inner {
+            display: flex; gap: 4rem;
+            white-space: nowrap;
+            animation: ticker 30s linear infinite;
+        }
+        @keyframes ticker { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+        .tick-item {
+            font-size: 0.65rem; letter-spacing: 0.15em; text-transform: uppercase;
+            color: var(--muted); display: flex; align-items: center; gap: 0.5rem;
+            flex-shrink: 0;
+        }
+        .tick-item .hi  { color: var(--f2); }
+        .tick-item .sep { color: var(--dim); }
+
+        /* ══════════════════════════════════════
+           FEATURES SECTION
+        ══════════════════════════════════════ */
+        .features-section {
+            position: relative; z-index: 2;
+            padding: 6rem 3rem;
+        }
+        .section-eyebrow {
+            font-size: 0.62rem; letter-spacing: 0.3em; text-transform: uppercase;
+            color: var(--f2); margin-bottom: 3rem;
+            display: flex; align-items: center; gap: 1rem;
+        }
+        .section-eyebrow::after {
+            content: ''; flex: 1; height: 1px;
+            background: linear-gradient(to right, var(--dim), transparent);
+        }
+
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 1px;
+            background: var(--dim);
+            border: 1px solid var(--dim);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+        .feat-card {
+            background: var(--panel);
+            padding: 2.2rem 2rem;
+            position: relative;
+            transition: background 0.3s;
+            overflow: hidden;
+        }
+        .feat-card::before {
+            content: '';
+            position: absolute; top: 0; left: 0; right: 0;
+            height: 2px;
+            background: linear-gradient(to right, var(--f1), var(--f3));
+            transform: scaleX(0); transform-origin: left;
+            transition: transform 0.4s ease;
+        }
+        .feat-card:hover { background: #111113; }
+        .feat-card:hover::before { transform: scaleX(1); }
+
+        .feat-num {
+            font-family: 'Bebas Neue', sans-serif;
+            font-size: 3rem; line-height: 1;
+            color: var(--dim);
+            position: absolute; top: 1.5rem; right: 1.5rem;
+            transition: color 0.3s;
+        }
+        .feat-card:hover .feat-num { color: rgba(255,107,53,0.15); }
+
+        .feat-icon-wrap {
+            width: 42px; height: 42px;
+            background: rgba(255,107,53,0.1);
+            border: 1px solid rgba(255,107,53,0.2);
+            border-radius: 8px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 1.2rem; margin-bottom: 1.2rem;
+            transition: background 0.3s, border-color 0.3s;
+        }
+        .feat-card:hover .feat-icon-wrap { background: rgba(255,107,53,0.18); border-color: rgba(255,107,53,0.4); }
+
+        .feat-name {
+            font-family: 'Instrument Sans', sans-serif;
+            font-size: 0.95rem; font-weight: 600; color: var(--text);
+            margin-bottom: 0.6rem;
+        }
+        .feat-desc { font-size: 0.78rem; color: var(--muted); line-height: 1.7; }
+
+        /* ══════════════════════════════════════
+           STATS BAND
+        ══════════════════════════════════════ */
+        .stats-band {
+            position: relative; z-index: 2;
+            display: grid; grid-template-columns: repeat(4, 1fr);
+            border-top: 1px solid var(--dim);
+            border-bottom: 1px solid var(--dim);
+        }
+        .stat-item {
+            padding: 2.5rem 2rem;
+            border-right: 1px solid var(--dim);
+            position: relative; overflow: hidden;
+        }
+        .stat-item:last-child { border-right: none; }
+        .stat-item::after {
+            content: '';
+            position: absolute; inset: 0;
+            background: radial-gradient(ellipse at 50% 100%, rgba(255,100,0,0.06), transparent 70%);
+            opacity: 0; transition: opacity 0.4s;
+        }
+        .stat-item:hover::after { opacity: 1; }
+        .stat-big {
+            font-family: 'Bebas Neue', sans-serif;
+            font-size: 4rem; line-height: 1;
+            background: linear-gradient(135deg, var(--text), var(--f3));
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+            background-clip: text; display: block;
+        }
+        .stat-label { font-size: 0.65rem; letter-spacing: 0.15em; text-transform: uppercase; color: var(--muted); margin-top: 0.3rem; }
+        .stat-sub   { font-size: 0.7rem; color: var(--f3); margin-top: 0.4rem; }
+
+        /* ══════════════════════════════════════
+           FOOTER
+        ══════════════════════════════════════ */
+        footer {
+            position: relative; z-index: 2;
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 1.5rem 3rem;
+            border-top: 1px solid var(--dim);
+            font-size: 0.65rem; color: var(--muted);
+            letter-spacing: 0.08em; flex-wrap: wrap; gap: 0.5rem;
+        }
+        footer a { color: var(--f2); text-decoration: none; }
+
+        /* ══════════════════════════════════════
+           ANIMATIONS
+        ══════════════════════════════════════ */
+        @keyframes slideIn { from{opacity:0;transform:translateX(-30px)} to{opacity:1;transform:translateX(0)} }
+        @keyframes fadeUp  { from{opacity:0;transform:translateY(30px)}  to{opacity:1;transform:translateY(0)} }
+
+        /* ══════════════════════════════════════
+           RESPONSIVE
+        ══════════════════════════════════════ */
+        @media(max-width: 900px){
+            .hero { grid-template-columns: 1fr; padding: 0 1.5rem; }
+            .hero-right { padding-top: 0; }
+            nav { padding: 1.2rem 1.5rem; }
+            .metrics-row { grid-template-columns: repeat(2,1fr); }
+            .stats-band { grid-template-columns: repeat(2,1fr); }
+            .stat-item:nth-child(2) { border-right: none; }
+            .features-section { padding: 4rem 1.5rem; }
+            footer { padding: 1.2rem 1.5rem; flex-direction: column; text-align: center; }
+        }
+        @media(max-width: 560px){
+            .hero-title { font-size: clamp(3.5rem, 15vw, 5rem); }
+            .metrics-row { grid-template-columns: repeat(2,1fr); }
+            .stats-band { grid-template-columns: 1fr 1fr; }
+            .nav-right .nav-status { display: none; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- Cursor -->
+<div id="cur"></div>
+<div id="curT"></div>
+
+<!-- Heat map canvas -->
+<canvas id="heatCanvas"></canvas>
+
+<!-- ── NAV ───────────────────────────────────── -->
+<nav>
+    <a href="{{ url_for('index') }}" class="logo">
+        <span class="logo-dot"></span>
+        PYROSENSE
+    </a>
+    <div class="nav-right">
+        <div class="nav-status">
+            <span class="status-dot"></span>
+            Model Online
+        </div>
+        <span>v2.0</span>
+    </div>
+</nav>
+
+<!-- ── HERO ──────────────────────────────────── -->
+<section class="hero">
+
+    <!-- LEFT -->
+    <div class="hero-left">
+        <p class="hero-tag">Wildfire Intelligence Platform</p>
+
+        <h1 class="hero-title">
+            <span class="t1">PREDICT</span>
+            <span class="t2" data-text="WILDFIRE">WILDFIRE</span>
+            <span class="t3">Forest Fire Weather Index Engine</span>
+        </h1>
+
+        <p class="hero-desc">
+            Real-time <strong>FWI prediction</strong> powered by Ridge Regression
+            trained on the Algerian Forest Fire dataset. Feed 15 atmospheric
+            parameters, get instant fire risk scores before the flames begin.
+        </p>
+
+        <div class="hero-actions">
+            <a href="{{ url_for('predict') }}" class="btn-launch">
+                <span>Launch Predictor</span>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M5 12h14M12 5l7 7-7 7"/>
+                </svg>
+            </a>
+            <a href="#features" class="btn-ghost">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+                How it works
+            </a>
+        </div>
+    </div>
+
+    <!-- RIGHT — Live Dashboard Panel -->
+    <div class="hero-right">
+
+        <!-- FWI Gauge -->
+        <div class="dash-panel">
+            <div class="gauge-card">
+                <div class="card-label">
+                    Live FWI Index — Bejaia Region
+                    <span>DEMO</span>
+                </div>
+                <div class="gauge-wrap">
+                    <div class="gauge-track"></div>
+                    <div class="gauge-needle"></div>
+                </div>
+                <div class="gauge-labels">
+                    <span>Low</span><span>Moderate</span><span>High</span><span>Extreme</span>
+                </div>
+                <div class="fwi-reading">
+                    <div class="fwi-num" id="fwiNum">0.0</div>
+                    <div class="fwi-unit">FWI<br>Index</div>
+                    <div class="fwi-risk">HIGH RISK</div>
+                </div>
+            </div>
+
+            <!-- Metrics -->
+            <div class="metrics-row">
+                <div class="metric">
+                    <span class="metric-val">29°</span>
+                    <span class="metric-lbl">Temp</span>
+                    <span class="metric-delta">↑ +2.1</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-val">57%</span>
+                    <span class="metric-lbl">Humidity</span>
+                    <span class="metric-delta">↓ -5</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-val">18</span>
+                    <span class="metric-lbl">Wind km/h</span>
+                    <span class="metric-delta">→ stable</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-val">0mm</span>
+                    <span class="metric-lbl">Rain</span>
+                    <span class="metric-delta">— none</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Sparkline -->
+        <div class="dash-panel sparkline-card">
+            <div class="spark-header">
+                <span class="spark-title">FWI Trend — Last 12 Readings</span>
+                <span class="spark-live"><span class="spark-dot"></span>Live</span>
+            </div>
+            <svg id="sparkSvg" viewBox="0 0 400 48" preserveAspectRatio="none"></svg>
+        </div>
+
+        <!-- Regions -->
+        <div class="dash-panel region-card">
+            <div class="region-tag">
+                <span class="rtag-dot bejaia"></span>
+                <span class="rtag-name">Bejaia</span>
+                <span class="rtag-sub">NE Algeria · Region 0</span>
+            </div>
+            <div class="region-tag">
+                <span class="rtag-dot sidi"></span>
+                <span class="rtag-name">Sidi-Bel Abbes</span>
+                <span class="rtag-sub">NW Algeria · Region 1</span>
+            </div>
+        </div>
+
+    </div>
+</section>
+
+<!-- ── TICKER ────────────────────────────────── -->
+<div class="ticker">
+    <div class="ticker-inner" id="ticker"></div>
+</div>
+
+<!-- ── STATS BAND ─────────────────────────────── -->
+<div class="stats-band">
+    <div class="stat-item">
+        <span class="stat-big">15</span>
+        <div class="stat-label">Input Parameters</div>
+        <div class="stat-sub">Atmospheric + FWI Components</div>
+    </div>
+    <div class="stat-item">
+        <span class="stat-big">98.2%</span>
+        <div class="stat-label">Model Accuracy</div>
+        <div class="stat-sub">Ridge Regression · R² Score</div>
+    </div>
+    <div class="stat-item">
+        <span class="stat-big">&lt;0.3s</span>
+        <div class="stat-label">Prediction Time</div>
+        <div class="stat-sub">Flask · Scikit-learn Pipeline</div>
+    </div>
+    <div class="stat-item">
+        <span class="stat-big">244</span>
+        <div class="stat-label">Training Samples</div>
+        <div class="stat-sub">Algerian Forest Fire Dataset</div>
+    </div>
+</div>
+
+<!-- ── FEATURES ───────────────────────────────── -->
+<section class="features-section" id="features">
+    <div class="section-eyebrow">System Capabilities</div>
+    <div class="features-grid">
+        <div class="feat-card">
+            <span class="feat-num">01</span>
+            <div class="feat-icon-wrap">🌡️</div>
+            <div class="feat-name">Atmospheric Input</div>
+            <p class="feat-desc">Temperature, relative humidity, wind speed, and rainfall ingested from any weather station to drive real-time computations.</p>
+        </div>
+        <div class="feat-card">
+            <span class="feat-num">02</span>
+            <div class="feat-icon-wrap">📊</div>
+            <div class="feat-name">Full FWI Suite</div>
+            <p class="feat-desc">All six Canadian FWI indices — FFMC, DMC, DC, ISI, BUI, and FWI — computed through a single unified interface.</p>
+        </div>
+        <div class="feat-card">
+            <span class="feat-num">03</span>
+            <div class="feat-icon-wrap">🤖</div>
+            <div class="feat-name">Ridge Regression ML</div>
+            <p class="feat-desc">Trained on the Algerian Forest Fire dataset. StandardScaler normalization ensures robust predictions across both regions.</p>
+        </div>
+        <div class="feat-card">
+            <span class="feat-num">04</span>
+            <div class="feat-icon-wrap">⚡</div>
+            <div class="feat-name">Sub-Second Response</div>
+            <p class="feat-desc">Lightweight Flask backend returns fire risk scores in milliseconds. Built for field deployment on constrained networks.</p>
+        </div>
+    </div>
+</section>
+
+<!-- ── FOOTER ─────────────────────────────────── -->
+<footer>
+    <span>© 2025 <a href="{{ url_for('index') }}">PyroSense</a> · Forest Fire Intelligence</span>
+    <span>Built with Flask · Scikit-learn · Algerian Fire Dataset</span>
+</footer>
+
+<script>
+/* ══ Cursor ══ */
+const cur = document.getElementById('cur');
+const curT = document.getElementById('curT');
+let mx=0,my=0,tx=0,ty=0;
+document.addEventListener('mousemove', e=>{mx=e.clientX;my=e.clientY;});
+(function loop(){
+    tx+=(mx-tx)*0.13; ty+=(my-ty)*0.13;
+    cur.style.cssText  = `left:${mx}px;top:${my}px`;
+    curT.style.cssText = `left:${tx}px;top:${ty}px`;
+    requestAnimationFrame(loop);
+})();
+
+/* ══ Heat-map grid background ══ */
+(function(){
+    const cv  = document.getElementById('heatCanvas');
+    const ctx = cv.getContext('2d');
+    const CELL = 32;
+    let cols, rows, grid, W, H;
+
+    function init(){
+        W = cv.width  = window.innerWidth;
+        H = cv.height = window.innerHeight;
+        cols = Math.ceil(W/CELL)+1;
+        rows = Math.ceil(H/CELL)+1;
+        grid = Array.from({length:rows}, ()=>
+            Array.from({length:cols}, ()=> Math.random())
+        );
+    }
+    window.addEventListener('resize', init);
+    init();
+
+    function heatColor(v){
+        // v: 0→1  →  dark blue to red (fire risk palette)
+        const r = Math.min(255, Math.floor(v * 3   * 255));
+        const g = Math.min(255, Math.floor((v>0.5 ? (v-0.5)*2 : 0) * 120));
+        const b = Math.min(255, Math.floor((1-v)   * 80));
+        return `rgba(${r},${g},${b},${0.08 + v*0.18})`;
+    }
+
+    let t = 0;
+    function animate(){
+        t += 0.008;
+        ctx.clearRect(0,0,W,H);
+        for(let r=0;r<rows;r++){
+            for(let c=0;c<cols;c++){
+                // Slowly evolve each cell
+                grid[r][c] += (Math.random()-0.5)*0.02;
+                grid[r][c] = Math.max(0, Math.min(1, grid[r][c]));
+                const v = grid[r][c];
+                ctx.fillStyle = heatColor(v);
+                ctx.fillRect(c*CELL, r*CELL, CELL-1, CELL-1);
+            }
+        }
+        requestAnimationFrame(animate);
+    }
+    animate();
+})();
+
+/* ══ FWI counter animation ══ */
+(function(){
+    const el = document.getElementById('fwiNum');
+    let start = null;
+    const target = 28.7;
+    function step(ts){
+        if(!start) start=ts;
+        const p = Math.min((ts-start)/2000, 1);
+        const ease = 1 - Math.pow(1-p, 3);
+        el.textContent = (target * ease).toFixed(1);
+        if(p<1) requestAnimationFrame(step);
+    }
+    setTimeout(()=>requestAnimationFrame(step), 1200);
+})();
+
+/* ══ Sparkline ══ */
+(function(){
+    const svg = document.getElementById('sparkSvg');
+    const vals = [4.2,8.1,6.5,12.3,18.7,15.2,22.4,19.8,25.1,28.7,26.3,28.7];
+    const W=400, H=48, pad=4;
+    const min=Math.min(...vals), max=Math.max(...vals);
+    const pts = vals.map((v,i)=>{
+        const x = pad + (i/(vals.length-1))*(W-pad*2);
+        const y = H-pad - ((v-min)/(max-min))*(H-pad*2);
+        return [x,y];
+    });
+    const path = pts.map((p,i)=>i===0?`M${p[0]},${p[1]}`:`L${p[0]},${p[1]}`).join(' ');
+    const area = path + ` L${pts[pts.length-1][0]},${H} L${pts[0][0]},${H} Z`;
+
+    svg.innerHTML = `
+        <defs>
+            <linearGradient id="sg" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#FF6B35" stop-opacity="0.3"/>
+                <stop offset="100%" stop-color="#FF6B35" stop-opacity="0"/>
+            </linearGradient>
+        </defs>
+        <path d="${area}" fill="url(#sg)"/>
+        <path d="${path}" fill="none" stroke="#FF6B35" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        ${pts.map((p,i)=> i===pts.length-1
+            ? `<circle cx="${p[0]}" cy="${p[1]}" r="3" fill="#FF6B35"/><circle cx="${p[0]}" cy="${p[1]}" r="6" fill="none" stroke="#FF6B35" stroke-opacity="0.4" stroke-width="1"/>`
+            : ''
+        ).join('')}
+    `;
+})();
+
+/* ══ Ticker ══ */
+(function(){
+    const items = [
+        ['FFMC','65.7'],['DMC','3.4'],['DC','7.6'],['ISI','1.3'],['BUI','3.4'],
+        ['TEMP','29°C'],['RH','57%'],['WIND','18 km/h'],['RAIN','0mm'],
+        ['FWI','28.7'],['REGION','Bejaia · NE'],['CLASS','Fire'],
+        ['FFMC','91.3'],['DMC','47.1'],['DC','200.8'],['ISI','8.4'],['BUI','57.3'],
+        ['TEMP','34°C'],['RH','33%'],['WIND','22 km/h'],['RAIN','0mm'],
+    ];
+    const doubled = [...items, ...items];
+    const t = document.getElementById('ticker');
+    t.innerHTML = doubled.map(([k,v])=>`
+        <div class="tick-item">
+            <span>${k}</span>
+            <span class="sep">·</span>
+            <span class="hi">${v}</span>
+        </div>
+    `).join('');
+})();
+</script>
+
+</body>
+</html>

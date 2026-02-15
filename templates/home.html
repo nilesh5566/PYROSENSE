@@ -1,0 +1,992 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PyroSense — FWI Predictor</title>
+    <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Instrument+Sans:ital,wght@0,400;0,600;1,400&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        :root {
+            --f1: #FF2200;
+            --f2: #FF6B35;
+            --f3: #FF9A00;
+            --ember: #FFD166;
+            --deep:  #070708;
+            --panel: #0e0e10;
+            --panel2:#121215;
+            --dim:   #1e1e22;
+            --dim2:  #2a2a30;
+            --text:  #F0EBE1;
+            --muted: #5a5560;
+            --muted2:#7a7585;
+            --green: #22c55e;
+            --input-bg: rgba(255,255,255,0.03);
+        }
+
+        html { scroll-behavior: smooth; }
+        body {
+            font-family: 'Instrument Sans', sans-serif;
+            background: var(--deep);
+            color: var(--text);
+            min-height: 100vh;
+            overflow-x: hidden;
+            cursor: none;
+        }
+
+        /* ── Cursor ── */
+        #cur {
+            position: fixed; width: 8px; height: 8px;
+            background: var(--f1); border-radius: 50%;
+            pointer-events: none; z-index: 9999;
+            transform: translate(-50%,-50%);
+        }
+        #curT {
+            position: fixed; width: 36px; height: 36px;
+            border: 1px solid rgba(255,107,53,0.35);
+            border-radius: 50%; pointer-events: none; z-index: 9998;
+            transform: translate(-50%,-50%);
+            transition: all 0.13s ease-out;
+        }
+        body:has(button:hover,a:hover,select:hover) #cur  { width:14px; height:14px; background:var(--ember); }
+        body:has(button:hover,a:hover,select:hover) #curT { width:48px; height:48px; border-color:var(--ember); }
+
+        /* ── Grid noise texture ── */
+        body::after {
+            content: ''; position: fixed; inset: 0; z-index: 0; pointer-events: none;
+            background-image:
+                linear-gradient(rgba(255,255,255,0.015) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255,255,255,0.015) 1px, transparent 1px);
+            background-size: 40px 40px;
+        }
+
+        /* ══════════════════════════
+           LAYOUT — 3-column
+        ══════════════════════════ */
+        .app-shell {
+            position: relative; z-index: 1;
+            display: grid;
+            grid-template-columns: 260px 1fr 300px;
+            grid-template-rows: 56px 1fr;
+            min-height: 100vh;
+        }
+
+        /* ── Top bar ── */
+        .topbar {
+            grid-column: 1 / -1;
+            display: flex; align-items: center;
+            border-bottom: 1px solid var(--dim);
+            background: rgba(7,7,8,0.95);
+            backdrop-filter: blur(12px);
+            padding: 0 1.5rem;
+            gap: 1.5rem;
+            position: sticky; top: 0; z-index: 50;
+        }
+        .tb-logo {
+            font-family: 'Bebas Neue', sans-serif;
+            font-size: 1.1rem; letter-spacing: 0.12em;
+            color: var(--text); text-decoration: none;
+            display: flex; align-items: center; gap: 0.4rem;
+            padding-right: 1.5rem;
+            border-right: 1px solid var(--dim);
+        }
+        .tb-logo-dot { width:7px; height:7px; border-radius:50%; background:var(--f1); animation:blink 1.4s ease-in-out infinite; }
+        @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+        .tb-breadcrumb {
+            display: flex; align-items: center; gap: 0.6rem;
+            font-size: 0.68rem; letter-spacing: 0.1em; text-transform: uppercase;
+            color: var(--muted);
+        }
+        .tb-breadcrumb a { color: var(--muted); text-decoration: none; transition: color 0.2s; }
+        .tb-breadcrumb a:hover { color: var(--text); }
+        .tb-sep { color: var(--dim2); }
+        .tb-current { color: var(--f2); }
+
+        .tb-right {
+            margin-left: auto;
+            display: flex; align-items: center; gap: 1rem;
+        }
+        .tb-badge {
+            font-size: 0.6rem; letter-spacing: 0.15em; text-transform: uppercase;
+            padding: 0.25rem 0.7rem; border-radius: 3px;
+            background: rgba(34,197,94,0.1); border: 1px solid rgba(34,197,94,0.25);
+            color: var(--green);
+        }
+        .tb-params {
+            font-size: 0.62rem; color: var(--muted); letter-spacing: 0.08em;
+        }
+        .tb-params span { color: var(--f3); font-weight: 600; }
+
+        /* ── Left sidebar ── */
+        .sidebar {
+            border-right: 1px solid var(--dim);
+            background: var(--panel);
+            padding: 1.5rem 0;
+            display: flex; flex-direction: column; gap: 0.25rem;
+        }
+        .sidebar-section {
+            padding: 0.3rem 1.2rem 0.1rem;
+            font-size: 0.55rem; letter-spacing: 0.25em; text-transform: uppercase;
+            color: var(--muted); margin-top: 0.8rem;
+        }
+        .sidebar-section:first-child { margin-top: 0; }
+
+        .sb-item {
+            display: flex; align-items: center; gap: 0.7rem;
+            padding: 0.55rem 1.2rem; margin: 0 0.5rem;
+            border-radius: 6px; cursor: pointer;
+            font-size: 0.75rem; color: var(--muted2);
+            transition: background 0.2s, color 0.2s;
+            border: 1px solid transparent;
+            text-decoration: none;
+        }
+        .sb-item:hover { background: var(--dim); color: var(--text); }
+        .sb-item.active {
+            background: rgba(255,107,53,0.1);
+            border-color: rgba(255,107,53,0.2);
+            color: var(--f2);
+        }
+        .sb-icon { font-size: 0.9rem; width: 18px; text-align: center; }
+        .sb-count {
+            margin-left: auto; font-size: 0.58rem;
+            background: var(--dim); border-radius: 10px;
+            padding: 0.1rem 0.45rem; color: var(--muted);
+        }
+        .sb-item.active .sb-count { background: rgba(255,107,53,0.2); color: var(--f2); }
+
+        .sidebar-divider { height: 1px; background: var(--dim); margin: 0.8rem 1rem; }
+
+        /* Progress in sidebar */
+        .sb-progress { padding: 1rem 1.2rem; margin-top: auto; }
+        .sb-prog-label {
+            display: flex; justify-content: space-between;
+            font-size: 0.6rem; color: var(--muted); letter-spacing: 0.1em;
+            text-transform: uppercase; margin-bottom: 0.5rem;
+        }
+        .sb-prog-label span { color: var(--f3); }
+        .sb-prog-bar {
+            height: 3px; background: var(--dim); border-radius: 2px; overflow: hidden;
+        }
+        .sb-prog-fill {
+            height: 100%; width: 0%;
+            background: linear-gradient(to right, var(--f1), var(--f3));
+            border-radius: 2px;
+            transition: width 0.4s ease;
+        }
+
+        /* ── Main form area ── */
+        .main-area {
+            overflow-y: auto;
+            padding: 2rem 2.5rem 4rem;
+        }
+
+        .form-section {
+            margin-bottom: 2.5rem;
+            animation: fadeUp 0.5s ease both;
+        }
+        .form-section:nth-child(1) { animation-delay: 0.05s; }
+        .form-section:nth-child(2) { animation-delay: 0.15s; }
+        .form-section:nth-child(3) { animation-delay: 0.25s; }
+
+        .fs-header {
+            display: flex; align-items: center; gap: 0.8rem;
+            margin-bottom: 1.3rem; padding-bottom: 0.8rem;
+            border-bottom: 1px solid var(--dim);
+        }
+        .fs-num {
+            font-family: 'Bebas Neue', sans-serif;
+            font-size: 1.1rem; color: var(--f2);
+            width: 28px; height: 28px;
+            border: 1px solid rgba(255,107,53,0.3);
+            border-radius: 4px;
+            display: flex; align-items: center; justify-content: center;
+            flex-shrink: 0;
+        }
+        .fs-title {
+            font-family: 'Bebas Neue', sans-serif;
+            font-size: 1rem; letter-spacing: 0.12em; color: var(--text);
+        }
+        .fs-desc { font-size: 0.68rem; color: var(--muted); margin-left: auto; letter-spacing: 0.05em; }
+
+        /* Field grids */
+        .fg-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.8rem; }
+        .fg-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.8rem; }
+        .fg-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.8rem; }
+
+        /* Individual field */
+        .field {
+            display: flex; flex-direction: column; gap: 0.35rem;
+            position: relative;
+        }
+        .field-label {
+            font-size: 0.58rem; letter-spacing: 0.18em; text-transform: uppercase;
+            color: var(--muted); display: flex; align-items: center; gap: 0.4rem;
+            transition: color 0.2s;
+        }
+        .field:focus-within .field-label { color: var(--f2); }
+
+        .field-unit {
+            font-size: 0.5rem; color: var(--dim2);
+            margin-left: auto; letter-spacing: 0.05em;
+        }
+
+        .field-wrap { position: relative; }
+        .field-wrap::before {
+            content: '';
+            position: absolute; left: 0; bottom: 0;
+            width: 0%; height: 1px;
+            background: linear-gradient(to right, var(--f1), var(--f3));
+            transition: width 0.3s ease;
+            z-index: 1;
+        }
+        .field:focus-within .field-wrap::before { width: 100%; }
+
+        input[type="number"],
+        select {
+            width: 100%;
+            background: var(--input-bg);
+            border: 1px solid var(--dim);
+            border-radius: 6px;
+            padding: 0.65rem 0.9rem;
+            font-family: 'DM Mono', monospace;
+            font-size: 0.85rem; color: var(--text);
+            outline: none;
+            transition: border-color 0.25s, background 0.25s;
+            -moz-appearance: textfield; appearance: none; -webkit-appearance: none;
+        }
+        input[type="number"]::-webkit-inner-spin-button,
+        input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; }
+        input:focus, select:focus {
+            border-color: rgba(255,107,53,0.5);
+            background: rgba(255,107,53,0.04);
+        }
+        input::placeholder { color: var(--dim2); font-size: 0.78rem; }
+        input:valid:not(:placeholder-shown) {
+            border-color: rgba(34,197,94,0.3);
+        }
+
+        /* Select arrow */
+        .select-wrap { position: relative; }
+        .select-wrap::after {
+            content: ''; position: absolute; right: 0.9rem; top: 50%;
+            transform: translateY(-50%);
+            width: 0; height: 0;
+            border-left: 4px solid transparent;
+            border-right: 4px solid transparent;
+            border-top: 5px solid var(--muted);
+            pointer-events: none; transition: border-top-color 0.2s;
+        }
+        .field:focus-within .select-wrap::after { border-top-color: var(--f2); }
+        select option { background: #0e0e10; color: var(--text); }
+
+        /* Classes tinting */
+        .cls-fire   { border-color: rgba(255,34,0,0.4)   !important; background: rgba(255,34,0,0.05)   !important; }
+        .cls-nofire { border-color: rgba(34,197,94,0.35) !important; background: rgba(34,197,94,0.04) !important; }
+
+        /* Tooltip */
+        .tip {
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 13px; height: 13px; border-radius: 50%;
+            border: 1px solid var(--dim2); font-size: 0.5rem; color: var(--muted);
+            cursor: default; position: relative; flex-shrink: 0;
+        }
+        .tip:hover::after {
+            content: attr(data-tip);
+            position: absolute; bottom: calc(100% + 5px); left: 50%;
+            transform: translateX(-50%);
+            background: var(--panel2); border: 1px solid var(--dim);
+            border-radius: 6px; padding: 0.35rem 0.6rem;
+            font-size: 0.6rem; color: var(--text);
+            white-space: nowrap; z-index: 99; pointer-events: none;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+            letter-spacing: 0.02em; text-transform: none;
+        }
+
+        /* ── Right panel ── */
+        .right-panel {
+            border-left: 1px solid var(--dim);
+            background: var(--panel);
+            padding: 1.5rem;
+            display: flex; flex-direction: column; gap: 1rem;
+            overflow-y: auto;
+        }
+
+        .rp-section-title {
+            font-size: 0.58rem; letter-spacing: 0.2em; text-transform: uppercase;
+            color: var(--muted); margin-bottom: 0.6rem;
+            display: flex; align-items: center; gap: 0.5rem;
+        }
+        .rp-section-title::after { content:''; flex:1; height:1px; background:var(--dim); }
+
+        /* Submit block */
+        .submit-block {
+            background: var(--panel2); border: 1px solid var(--dim);
+            border-radius: 10px; padding: 1.2rem;
+        }
+        .submit-info { font-size: 0.68rem; color: var(--muted); line-height: 1.6; margin-bottom: 1rem; }
+        .submit-info strong { color: var(--f3); font-weight: 600; }
+
+        button[type="submit"] {
+            width: 100%;
+            font-family: 'Bebas Neue', sans-serif;
+            font-size: 1rem; letter-spacing: 0.15em;
+            color: #000; background: linear-gradient(135deg, var(--f3), var(--ember));
+            border: none; border-radius: 6px;
+            padding: 0.85rem 1rem; cursor: pointer;
+            position: relative; overflow: hidden;
+            transition: transform 0.2s, box-shadow 0.2s;
+            box-shadow: 0 4px 24px rgba(255,154,0,0.25);
+        }
+        button[type="submit"]::before {
+            content: ''; position: absolute; inset: 0;
+            background: linear-gradient(135deg, var(--f1), var(--f2));
+            opacity: 0; transition: opacity 0.3s;
+        }
+        button[type="submit"]:hover { transform: translateY(-2px); box-shadow: 0 8px 36px rgba(255,100,0,0.4); }
+        button[type="submit"]:hover::before { opacity: 1; }
+        button[type="submit"] span { position: relative; z-index: 1; display: flex; align-items: center; justify-content: center; gap: 0.5rem; }
+
+        /* Param checklist */
+        .param-list {
+            display: flex; flex-direction: column; gap: 0.3rem;
+        }
+        .param-row {
+            display: flex; align-items: center; gap: 0.5rem;
+            font-size: 0.65rem; color: var(--muted); letter-spacing: 0.05em;
+            padding: 0.3rem 0.5rem; border-radius: 4px;
+            transition: background 0.2s;
+        }
+        .param-row.filled { color: var(--text); }
+        .param-row.filled .pr-dot { background: var(--green); box-shadow: 0 0 6px rgba(34,197,94,0.4); }
+        .pr-dot {
+            width: 5px; height: 5px; border-radius: 50%;
+            background: var(--dim2); flex-shrink: 0;
+            transition: background 0.3s, box-shadow 0.3s;
+        }
+        .pr-name { flex: 1; }
+        .pr-val  { font-family: 'DM Mono', monospace; font-size: 0.6rem; color: var(--f3); }
+
+        /* Risk guide */
+        .risk-guide { background: var(--panel2); border: 1px solid var(--dim); border-radius: 10px; padding: 1rem; }
+        .rg-row {
+            display: flex; align-items: center; gap: 0.7rem;
+            padding: 0.45rem 0;
+            border-bottom: 1px solid var(--dim);
+            font-size: 0.68rem;
+        }
+        .rg-row:last-child { border-bottom: none; }
+        .rg-bar {
+            width: 28px; height: 5px; border-radius: 2px; flex-shrink: 0;
+        }
+        .rg-label { color: var(--text); font-weight: 600; }
+        .rg-range { margin-left: auto; font-family: 'DM Mono', monospace; font-size: 0.6rem; color: var(--muted); }
+
+        /* ── Prediction result ── */
+        .result-overlay {
+            display: none;
+            position: fixed; inset: 0; z-index: 200;
+            background: rgba(7,7,8,0.92);
+            backdrop-filter: blur(8px);
+            align-items: center; justify-content: center;
+        }
+        .result-overlay.show { display: flex; animation: fadeIn 0.4s ease; }
+        @keyframes fadeIn { from{opacity:0} to{opacity:1} }
+
+        .result-card {
+            background: var(--panel);
+            border: 1px solid var(--dim);
+            border-radius: 16px;
+            padding: 3rem;
+            max-width: 480px; width: 90%;
+            text-align: center;
+            position: relative;
+            animation: scaleIn 0.4s cubic-bezier(0.22,1,0.36,1);
+        }
+        @keyframes scaleIn { from{transform:scale(0.85);opacity:0} to{transform:scale(1);opacity:1} }
+
+        .result-close {
+            position: absolute; top: 1rem; right: 1rem;
+            width: 28px; height: 28px; border-radius: 50%;
+            background: var(--dim); border: none; cursor: pointer;
+            color: var(--muted); font-size: 0.9rem;
+            display: flex; align-items: center; justify-content: center;
+            transition: background 0.2s, color 0.2s;
+        }
+        .result-close:hover { background: var(--dim2); color: var(--text); }
+
+        .result-tag {
+            font-size: 0.6rem; letter-spacing: 0.25em; text-transform: uppercase;
+            color: var(--f2); margin-bottom: 1rem;
+            display: flex; align-items: center; justify-content: center; gap: 0.5rem;
+        }
+        .result-tag::before, .result-tag::after {
+            content:''; display:block; width:24px; height:1px; background:var(--f2);
+        }
+
+        .result-num {
+            font-family: 'Bebas Neue', sans-serif;
+            font-size: clamp(5rem, 14vw, 8rem);
+            line-height: 1;
+            background: linear-gradient(135deg, var(--f1), var(--ember));
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 0.2rem;
+        }
+        .result-unit {
+            font-size: 0.7rem; letter-spacing: 0.2em; text-transform: uppercase;
+            color: var(--muted); margin-bottom: 1.5rem;
+        }
+
+        /* Risk level badge */
+        .risk-level {
+            display: inline-block;
+            font-family: 'Bebas Neue', sans-serif;
+            font-size: 1.1rem; letter-spacing: 0.15em;
+            padding: 0.4rem 1.5rem; border-radius: 4px;
+            margin-bottom: 1.5rem;
+        }
+        .risk-low      { background:rgba(34,197,94,0.15);  border:1px solid rgba(34,197,94,0.3);  color:#22c55e; }
+        .risk-moderate { background:rgba(234,179,8,0.15);  border:1px solid rgba(234,179,8,0.3);  color:#eab308; }
+        .risk-high     { background:rgba(249,115,22,0.15); border:1px solid rgba(249,115,22,0.3); color:#f97316; }
+        .risk-extreme  { background:rgba(255,34,0,0.15);   border:1px solid rgba(255,34,0,0.3);   color:var(--f1); }
+
+        .result-gauge {
+            width: 100%; height: 6px; background: var(--dim);
+            border-radius: 3px; overflow: hidden; margin-bottom: 1.5rem;
+        }
+        .result-gauge-fill {
+            height: 100%;
+            background: linear-gradient(to right, #22c55e, #eab308, #f97316, var(--f1));
+            border-radius: 3px; width: 0%;
+            transition: width 1s cubic-bezier(0.22,1,0.36,1);
+        }
+
+        .result-subtext { font-size: 0.75rem; color: var(--muted); line-height: 1.65; margin-bottom: 2rem; }
+        .result-subtext strong { color: var(--text); }
+
+        .result-actions { display: flex; gap: 0.8rem; justify-content: center; }
+        .btn-again {
+            font-family: 'Instrument Sans', sans-serif;
+            font-size: 0.78rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+            background: linear-gradient(135deg, var(--f3), var(--ember));
+            color: #000; border: none; border-radius: 6px;
+            padding: 0.7rem 1.5rem; cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .btn-again:hover { transform: translateY(-2px); box-shadow: 0 6px 24px rgba(255,154,0,0.3); }
+        .btn-home {
+            font-family: 'Instrument Sans', sans-serif;
+            font-size: 0.78rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+            background: transparent; color: var(--muted);
+            border: 1px solid var(--dim); border-radius: 6px;
+            padding: 0.7rem 1.5rem; cursor: pointer; text-decoration: none;
+            transition: color 0.2s, border-color 0.2s;
+            display: inline-flex;
+        }
+        .btn-home:hover { color: var(--text); border-color: var(--muted2); }
+
+        /* ── Error state in form ── */
+        .inline-error {
+            background: rgba(255,34,0,0.08);
+            border: 1px solid rgba(255,34,0,0.25);
+            border-radius: 8px; padding: 0.9rem 1.2rem;
+            font-size: 0.75rem; color: #ff6b6b;
+            margin-bottom: 1.5rem;
+            display: flex; align-items: center; gap: 0.6rem;
+        }
+
+        /* Animations */
+        @keyframes fadeUp { from{opacity:0;transform:translateY(16px)} to{opacity:1;transform:translateY(0)} }
+
+        /* ── Responsive ── */
+        @media(max-width:1100px){
+            .app-shell { grid-template-columns: 220px 1fr 260px; }
+        }
+        @media(max-width:860px){
+            .app-shell { grid-template-columns: 1fr; grid-template-rows: 56px auto; }
+            .sidebar   { display: none; }
+            .right-panel { border-left: none; border-top: 1px solid var(--dim); }
+            .main-area { padding: 1.5rem; }
+            .fg-4, .fg-3 { grid-template-columns: repeat(2,1fr); }
+        }
+        @media(max-width:560px){
+            .fg-4, .fg-3, .fg-2 { grid-template-columns: 1fr; }
+            .result-card { padding: 2rem 1.5rem; }
+        }
+    </style>
+</head>
+<body>
+
+<div id="cur"></div>
+<div id="curT"></div>
+
+<!-- ══════════════════════════════════════════════
+     RESULT OVERLAY (shown after prediction)
+══════════════════════════════════════════════ -->
+<div class="result-overlay" id="resultOverlay">
+    <div class="result-card">
+        <button class="result-close" id="closeResult">✕</button>
+        <div class="result-tag">Prediction Complete</div>
+        <div class="result-num" id="resultNum">—</div>
+        <div class="result-unit">Fire Weather Index Score</div>
+        <div class="risk-level" id="riskBadge">—</div>
+        <div class="result-gauge"><div class="result-gauge-fill" id="resultGauge"></div></div>
+        <p class="result-subtext" id="resultDesc">—</p>
+        <div class="result-actions">
+            <button class="btn-again" id="btnAgain">Run Another</button>
+            <a href="{{ url_for('index') }}" class="btn-home">← Back to Home</a>
+        </div>
+    </div>
+</div>
+
+<!-- ══════════════════════════════════════════════
+     APP SHELL
+══════════════════════════════════════════════ -->
+<div class="app-shell">
+
+    <!-- TOP BAR -->
+    <header class="topbar">
+        <a href="{{ url_for('index') }}" class="tb-logo">
+            <span class="tb-logo-dot"></span>
+            PYROSENSE
+        </a>
+        <div class="tb-breadcrumb">
+            <a href="{{ url_for('index') }}">Home</a>
+            <span class="tb-sep">/</span>
+            <span class="tb-current">FWI Predictor</span>
+        </div>
+        <div class="tb-right">
+            <span class="tb-params">Parameters: <span id="filledCount">0</span> / <span>15</span></span>
+            <div class="tb-badge">Model Active</div>
+        </div>
+    </header>
+
+    <!-- LEFT SIDEBAR -->
+    <aside class="sidebar">
+        <div class="sidebar-section">Sections</div>
+
+        <a class="sb-item active" href="#sec1">
+            <span class="sb-icon">📅</span>
+            Date & Weather
+            <span class="sb-count">7</span>
+        </a>
+        <a class="sb-item" href="#sec2">
+            <span class="sb-icon">🔥</span>
+            FWI Components
+            <span class="sb-count">6</span>
+        </a>
+        <a class="sb-item" href="#sec3">
+            <span class="sb-icon">📍</span>
+            Classification
+            <span class="sb-count">2</span>
+        </a>
+
+        <div class="sidebar-divider"></div>
+
+        <div class="sidebar-section">Reference</div>
+        <a class="sb-item" href="#features">
+            <span class="sb-icon">📖</span>
+            FWI Guide
+        </a>
+        <a class="sb-item" href="{{ url_for('index') }}">
+            <span class="sb-icon">🏠</span>
+            Landing Page
+        </a>
+
+        <div class="sidebar-divider"></div>
+
+        <div class="sb-progress">
+            <div class="sb-prog-label">
+                Form Completion
+                <span id="progPct">0%</span>
+            </div>
+            <div class="sb-prog-bar">
+                <div class="sb-prog-fill" id="progFill"></div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- MAIN FORM -->
+    <main class="main-area">
+        <form action="{{ url_for('predict') }}" method="post" id="fwiForm">
+
+            {% if prediction_text and 'Error' in prediction_text %}
+            <div class="inline-error">
+                ⚠ {{ prediction_text }}
+            </div>
+            {% endif %}
+
+            <!-- SECTION 1 — Date & Weather -->
+            <div class="form-section" id="sec1">
+                <div class="fs-header">
+                    <div class="fs-num">1</div>
+                    <div class="fs-title">Date & Atmospheric Conditions</div>
+                    <div class="fs-desc">7 parameters</div>
+                </div>
+                <div class="fg-3" style="margin-bottom:0.8rem">
+                    <div class="field">
+                        <div class="field-label">Day</div>
+                        <div class="field-wrap">
+                            <input type="number" name="day" id="f_day" placeholder="01" min="1" max="31" required>
+                        </div>
+                    </div>
+                    <div class="field">
+                        <div class="field-label">Month</div>
+                        <div class="field-wrap">
+                            <input type="number" name="month" id="f_month" placeholder="06" min="1" max="12" required>
+                        </div>
+                    </div>
+                    <div class="field">
+                        <div class="field-label">Year</div>
+                        <div class="field-wrap">
+                            <input type="number" name="year" id="f_year" placeholder="2012" min="2000" max="2100" required>
+                        </div>
+                    </div>
+                </div>
+                <div class="fg-4">
+                    <div class="field">
+                        <div class="field-label">
+                            Temperature
+                            <span class="tip" data-tip="Noon air temp in °C">?</span>
+                            <span class="field-unit">°C</span>
+                        </div>
+                        <div class="field-wrap">
+                            <input type="number" name="Temperature" id="f_Temperature" placeholder="29.0" step="0.1" required>
+                        </div>
+                    </div>
+                    <div class="field">
+                        <div class="field-label">
+                            Humidity
+                            <span class="tip" data-tip="Relative humidity at noon (0–100%)">?</span>
+                            <span class="field-unit">%</span>
+                        </div>
+                        <div class="field-wrap">
+                            <input type="number" name="RH" id="f_RH" placeholder="57" step="0.1" min="0" max="100" required>
+                        </div>
+                    </div>
+                    <div class="field">
+                        <div class="field-label">
+                            Wind Speed
+                            <span class="tip" data-tip="Wind speed at noon in km/h">?</span>
+                            <span class="field-unit">km/h</span>
+                        </div>
+                        <div class="field-wrap">
+                            <input type="number" name="Ws" id="f_Ws" placeholder="18" step="0.1" min="0" required>
+                        </div>
+                    </div>
+                    <div class="field">
+                        <div class="field-label">
+                            Rain
+                            <span class="tip" data-tip="Total daily rainfall in mm">?</span>
+                            <span class="field-unit">mm</span>
+                        </div>
+                        <div class="field-wrap">
+                            <input type="number" name="Rain" id="f_Rain" placeholder="0.00" step="0.01" min="0" required>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- SECTION 2 — FWI Components -->
+            <div class="form-section" id="sec2">
+                <div class="fs-header">
+                    <div class="fs-num">2</div>
+                    <div class="fs-title">Fire Weather Index Components</div>
+                    <div class="fs-desc">6 parameters</div>
+                </div>
+                <div class="fg-3">
+                    <div class="field">
+                        <div class="field-label">FFMC <span class="tip" data-tip="Fine Fuel Moisture Code (0–101)">?</span></div>
+                        <div class="field-wrap">
+                            <input type="number" name="FFMC" id="f_FFMC" placeholder="65.7" step="0.01" min="0" max="101" required>
+                        </div>
+                    </div>
+                    <div class="field">
+                        <div class="field-label">DMC <span class="tip" data-tip="Duff Moisture Code — organic layer moisture">?</span></div>
+                        <div class="field-wrap">
+                            <input type="number" name="DMC" id="f_DMC" placeholder="3.4" step="0.01" min="0" required>
+                        </div>
+                    </div>
+                    <div class="field">
+                        <div class="field-label">DC <span class="tip" data-tip="Drought Code — deep organic layer moisture">?</span></div>
+                        <div class="field-wrap">
+                            <input type="number" name="DC" id="f_DC" placeholder="7.6" step="0.01" min="0" required>
+                        </div>
+                    </div>
+                    <div class="field">
+                        <div class="field-label">ISI <span class="tip" data-tip="Initial Spread Index — rate of fire spread">?</span></div>
+                        <div class="field-wrap">
+                            <input type="number" name="ISI" id="f_ISI" placeholder="1.3" step="0.01" min="0" required>
+                        </div>
+                    </div>
+                    <div class="field">
+                        <div class="field-label">BUI <span class="tip" data-tip="Build Up Index — available fuel for combustion">?</span></div>
+                        <div class="field-wrap">
+                            <input type="number" name="BUI" id="f_BUI" placeholder="3.4" step="0.01" min="0" required>
+                        </div>
+                    </div>
+                    <div class="field">
+                        <div class="field-label">FWI <span class="tip" data-tip="Fire Weather Index — overall fire intensity">?</span></div>
+                        <div class="field-wrap">
+                            <input type="number" name="FWI" id="f_FWI" placeholder="0.5" step="0.01" min="0" required>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- SECTION 3 — Classification & Region -->
+            <div class="form-section" id="sec3">
+                <div class="fs-header">
+                    <div class="fs-num">3</div>
+                    <div class="fs-title">Classification & Region</div>
+                    <div class="fs-desc">2 parameters</div>
+                </div>
+                <div class="fg-2">
+                    <div class="field">
+                        <div class="field-label">Fire Class <span class="tip" data-tip="Observed classification for this record">?</span></div>
+                        <div class="select-wrap">
+                            <select name="Classes" id="f_Classes" required>
+                                <option value="" disabled selected>Select…</option>
+                                <option value="fire">🔥 Fire</option>
+                                <option value="not fire">🌿 Not Fire</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="field">
+                        <div class="field-label">Region <span class="tip" data-tip="0 = Bejaia (NE) · 1 = Sidi-Bel Abbes (NW)">?</span></div>
+                        <div class="select-wrap">
+                            <select name="Region" id="f_Region" required>
+                                <option value="" disabled selected>Select…</option>
+                                <option value="0">📍 Bejaia — NE Algeria</option>
+                                <option value="1">📍 Sidi-Bel Abbes — NW Algeria</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Hidden submit (triggered from right panel button) -->
+            <button type="submit" id="hiddenSubmit" style="display:none"></button>
+
+        </form>
+    </main>
+
+    <!-- RIGHT PANEL -->
+    <aside class="right-panel">
+
+        <!-- Submit -->
+        <div>
+            <div class="rp-section-title">Run Prediction</div>
+            <div class="submit-block">
+                <p class="submit-info">Fill all <strong>15 parameters</strong> to enable prediction. All fields are required.</p>
+                <button type="button" id="submitBtn" onclick="document.getElementById('fwiForm').requestSubmit()">
+                    <span>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                        Predict FWI
+                    </span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Parameter status -->
+        <div>
+            <div class="rp-section-title">Parameter Status</div>
+            <div class="param-list" id="paramList">
+                <!-- populated by JS -->
+            </div>
+        </div>
+
+        <!-- FWI Risk Guide -->
+        <div>
+            <div class="rp-section-title">FWI Risk Guide</div>
+            <div class="risk-guide">
+                <div class="rg-row">
+                    <div class="rg-bar" style="background:#22c55e"></div>
+                    <span class="rg-label">Low</span>
+                    <span class="rg-range">0 – 5.2</span>
+                </div>
+                <div class="rg-row">
+                    <div class="rg-bar" style="background:#eab308"></div>
+                    <span class="rg-label">Moderate</span>
+                    <span class="rg-range">5.2 – 11.2</span>
+                </div>
+                <div class="rg-row">
+                    <div class="rg-bar" style="background:#f97316"></div>
+                    <span class="rg-label">High</span>
+                    <span class="rg-range">11.2 – 21.3</span>
+                </div>
+                <div class="rg-row">
+                    <div class="rg-bar" style="background:#ef4444"></div>
+                    <span class="rg-label">Very High</span>
+                    <span class="rg-range">21.3 – 38</span>
+                </div>
+                <div class="rg-row">
+                    <div class="rg-bar" style="background:var(--f1)"></div>
+                    <span class="rg-label">Extreme</span>
+                    <span class="rg-range">38+</span>
+                </div>
+            </div>
+        </div>
+
+    </aside>
+
+</div><!-- end app-shell -->
+
+<!-- ══════════════════════════════════════════════
+     SCRIPT
+══════════════════════════════════════════════ -->
+<script>
+/* ── Cursor ── */
+const cur=document.getElementById('cur'), curT=document.getElementById('curT');
+let mx=0,my=0,tx=0,ty=0;
+document.addEventListener('mousemove',e=>{mx=e.clientX;my=e.clientY;});
+(function loop(){ tx+=(mx-tx)*0.13; ty+=(my-ty)*0.13; cur.style.left=mx+'px';cur.style.top=my+'px';curT.style.left=tx+'px';curT.style.top=ty+'px'; requestAnimationFrame(loop); })();
+
+/* ── All tracked fields ── */
+const FIELDS = [
+    {id:'f_day',         label:'Day'},
+    {id:'f_month',       label:'Month'},
+    {id:'f_year',        label:'Year'},
+    {id:'f_Temperature', label:'Temperature'},
+    {id:'f_RH',          label:'Humidity'},
+    {id:'f_Ws',          label:'Wind Speed'},
+    {id:'f_Rain',        label:'Rain'},
+    {id:'f_FFMC',        label:'FFMC'},
+    {id:'f_DMC',         label:'DMC'},
+    {id:'f_DC',          label:'DC'},
+    {id:'f_ISI',         label:'ISI'},
+    {id:'f_BUI',         label:'BUI'},
+    {id:'f_FWI',         label:'FWI'},
+    {id:'f_Classes',     label:'Fire Class'},
+    {id:'f_Region',      label:'Region'},
+];
+
+/* Build param list in right panel */
+const paramList = document.getElementById('paramList');
+FIELDS.forEach(f=>{
+    const row = document.createElement('div');
+    row.className = 'param-row';
+    row.id = 'pr_'+f.id;
+    row.innerHTML = `<span class="pr-dot"></span><span class="pr-name">${f.label}</span><span class="pr-val" id="pv_${f.id}">—</span>`;
+    paramList.appendChild(row);
+});
+
+/* Update progress & param list on input */
+function updateProgress(){
+    let filled = 0;
+    FIELDS.forEach(f=>{
+        const el  = document.getElementById(f.id);
+        const row = document.getElementById('pr_'+f.id);
+        const val = document.getElementById('pv_'+f.id);
+        const v   = el ? el.value.trim() : '';
+        if(v){
+            filled++;
+            row.classList.add('filled');
+            val.textContent = v.length > 8 ? v.substring(0,7)+'…' : v;
+        } else {
+            row.classList.remove('filled');
+            val.textContent = '—';
+        }
+    });
+    const pct = Math.round((filled/FIELDS.length)*100);
+    document.getElementById('filledCount').textContent = filled;
+    document.getElementById('progFill').style.width = pct+'%';
+    document.getElementById('progPct').textContent  = pct+'%';
+}
+
+/* Attach listeners */
+FIELDS.forEach(f=>{
+    const el = document.getElementById(f.id);
+    if(el) el.addEventListener('input', updateProgress);
+});
+
+/* Classes tinting */
+const clsSel = document.getElementById('f_Classes');
+clsSel.addEventListener('change',()=>{
+    clsSel.classList.remove('cls-fire','cls-nofire');
+    if(clsSel.value==='fire')     clsSel.classList.add('cls-fire');
+    if(clsSel.value==='not fire') clsSel.classList.add('cls-nofire');
+    updateProgress();
+});
+document.getElementById('f_Region').addEventListener('change', updateProgress);
+
+/* Sidebar active on scroll */
+const sections = ['sec1','sec2','sec3'];
+window.addEventListener('scroll', ()=>{
+    const main = document.querySelector('.main-area');
+    const scrollTop = main ? main.scrollTop : 0;
+    sections.forEach((id,i)=>{
+        const el = document.getElementById(id);
+        const sb = document.querySelectorAll('.sb-item')[i];
+        if(!el || !sb) return;
+        if(el.offsetTop - 100 <= scrollTop) {
+            document.querySelectorAll('.sb-item').forEach(s=>s.classList.remove('active'));
+            sb.classList.add('active');
+        }
+    });
+}, {passive:true});
+
+/* ── Handle prediction result ── */
+{% if prediction_text and 'Error' not in prediction_text %}
+(function(){
+    const raw = "{{ prediction_text }}";
+    const match = raw.match(/[\d.]+/);
+    const val = match ? parseFloat(match[0]) : null;
+
+    if(val === null) return;
+
+    // Determine risk level
+    let riskClass, riskLabel, desc;
+    if(val < 5.2){
+        riskClass='risk-low'; riskLabel='LOW RISK';
+        desc = `A FWI of <strong>${val}</strong> indicates <strong>low fire danger</strong>. Fuel moisture is adequate and weather conditions are not conducive to fire spread.`;
+    } else if(val < 11.2){
+        riskClass='risk-moderate'; riskLabel='MODERATE RISK';
+        desc = `A FWI of <strong>${val}</strong> indicates <strong>moderate fire danger</strong>. Some caution is advised. Fires can start and spread under dry conditions.`;
+    } else if(val < 21.3){
+        riskClass='risk-high'; riskLabel='HIGH RISK';
+        desc = `A FWI of <strong>${val}</strong> indicates <strong>high fire danger</strong>. Fires will start easily, spread rapidly, and be difficult to control.`;
+    } else if(val < 38){
+        riskClass='risk-extreme'; riskLabel='VERY HIGH RISK';
+        desc = `A FWI of <strong>${val}</strong> indicates <strong>very high fire danger</strong>. Extreme caution required. All fires are potentially serious.`;
+    } else {
+        riskClass='risk-extreme'; riskLabel='EXTREME RISK';
+        desc = `A FWI of <strong>${val}</strong> indicates <strong>extreme fire danger</strong>. Any fire will spread very rapidly and be very difficult to control.`;
+    }
+
+    // Fill overlay
+    document.getElementById('resultNum').textContent = val.toFixed(1);
+    const badge = document.getElementById('riskBadge');
+    badge.textContent = riskLabel;
+    badge.className = 'risk-level ' + riskClass;
+    document.getElementById('resultDesc').innerHTML = desc;
+
+    // Gauge fill (max ~80 for extreme)
+    const gaugePct = Math.min(100, (val/80)*100);
+    const overlay = document.getElementById('resultOverlay');
+    overlay.classList.add('show');
+    setTimeout(()=>{
+        document.getElementById('resultGauge').style.width = gaugePct+'%';
+    }, 400);
+})();
+{% endif %}
+
+/* Close overlay */
+document.getElementById('closeResult').addEventListener('click',()=>{
+    document.getElementById('resultOverlay').classList.remove('show');
+});
+document.getElementById('btnAgain').addEventListener('click',()=>{
+    document.getElementById('resultOverlay').classList.remove('show');
+    document.getElementById('fwiForm').reset();
+    updateProgress();
+    document.querySelectorAll('select').forEach(s=>{s.classList.remove('cls-fire','cls-nofire');});
+});
+
+/* Init progress */
+updateProgress();
+</script>
+
+</body>
+</html>
